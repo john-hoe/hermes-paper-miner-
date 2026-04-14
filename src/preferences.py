@@ -1,0 +1,107 @@
+"""PM-002.1 + PM-002.2: 偏好管理与 Prompt 构建"""
+
+import json
+import os
+from datetime import datetime, timedelta
+
+PROMPT_TEMPLATE = """你是一位资深 AI 工程师兼科技投资人，正在为一位技术型创业者筛选每日 AI 论文。
+
+## 评审任务
+请对以下论文进行多维度评审，输出严格的 JSON 格式。
+
+## 待评审论文
+标题：{title}
+作者：{authors}
+摘要：{summary}
+
+## 用户当前关注方向
+{focus_areas}
+
+## 用户不感兴趣的方向
+{reject_areas}
+
+## 评审维度（满分100分）
+1. 工程落地性 (40%): 是否有开源代码？复现门槛多高？能否直接用到产品中？
+2. 痛点解决度 (30%): 是解决真实工程痛点，还是单纯跑分刷榜？
+3. 创新性 (20%): 思路是否新颖？是incremental还是breakthrough？
+4. 出圈潜力 (10%): 商业产品化的可能性有多大？
+
+## 附加加分
+- 大厂/顶尖高校（Meta, Google, OpenAI, Anthropic, Microsoft, Stanford, MIT, 清华, 北大等）: +5~10分
+- 命中用户关注方向: +10~15分（在 preference_hit 中标注具体命中哪条）
+
+## 翻译纪律（极其重要，违反将导致严重扣分）
+- 所有 AI/ML 专有名词必须保留英文原词：RAG, MoE, Agent, Transformer, LoRA, fine-tuning, inference, RLHF, DPO, CoT, few-shot, zero-shot, embedding, token, KV cache 等
+- 严禁翻译成"检索增强生成"、"专家混合"等生硬中文
+- 普通描述性文字用中文，但技术术语一律保留英文
+
+## 输出格式（严格 JSON，不要添加任何 markdown 标记）
+{{
+    "score": <整数，最终总分>,
+    "institution": "<第一作者/通讯作者所属机构，未知填 unknown>",
+    "institution_bonus": <整数，机构加分 0-10>,
+    "preference_hit": "<命中的关注方向，未命中填 null>",
+    "preference_bonus": <整数，偏好加分 0-15>,
+    "one_liner": "<一句话中文总结这篇论文做了什么，保留英文专有名词>",
+    "scenarios": [
+        "<落地场景1：具体的商业/工程应用>",
+        "<落地场景2>",
+        "<落地场景3>"
+    ],
+    "caveat": "<落地劝退点：显存要求/数据要求/许可限制等>"
+}}
+"""
+
+
+def load_preferences(filepath):
+    """加载用户偏好配置。"""
+    if not os.path.exists(filepath):
+        return {"focus_areas": [], "reject_areas": [], "last_updated": ""}
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_preferences(filepath, prefs):
+    """保存用户偏好配置。"""
+    prefs["last_updated"] = datetime.now().strftime("%Y-%m-%d")
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(prefs, f, indent=2, ensure_ascii=False)
+
+
+def build_scoring_prompt(paper, preferences):
+    """为单篇论文构建完整的评审 Prompt。"""
+    focus = "\n".join(
+        f"- {a['keyword']} (权重: {a.get('weight', 0.5)})"
+        for a in preferences.get("focus_areas", [])
+    )
+    reject = "\n".join(f"- {r}" for r in preferences.get("reject_areas", []))
+    authors = ", ".join(paper.get("authors", [])[:5])
+    
+    return PROMPT_TEMPLATE.format(
+        title=paper["title"],
+        authors=authors,
+        summary=paper["summary"],
+        focus_areas=focus or "- 暂无设定",
+        reject_areas=reject or "- 暂无设定",
+    )
+
+
+def should_remind_preferences(preferences, interval_days=14):
+    """判断是否需要提醒用户更新偏好。"""
+    last = preferences.get("last_updated", "")
+    if not last:
+        return True
+    try:
+        last_date = datetime.strptime(last, "%Y-%m-%d")
+        return (datetime.now() - last_date).days >= interval_days
+    except ValueError:
+        return True
+
+
+def get_reminder_text(preferences):
+    """生成偏好提醒文案。"""
+    return (
+        "🔔 [偏好保鲜提醒] 您的 AI 关注方向已使用超过 14 天，"
+        "如有新方向或变动，请直接回复我「更新偏好」。"
+    )
