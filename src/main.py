@@ -77,6 +77,29 @@ def run():
             logger.info("无论文数据")
             return
 
+        # 过滤陈旧论文（只保留180天内的）
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=180)
+        fresh_papers = []
+        for p in papers:
+            pub = p.get("published", "")
+            if pub:
+                try:
+                    pub_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                    if pub_dt >= cutoff:
+                        fresh_papers.append(p)
+                except ValueError:
+                    fresh_papers.append(p)  # 解析失败则保留
+            else:
+                fresh_papers.append(p)
+        if fresh_papers:
+            logger.info(f"新鲜度过滤：{len(papers)} → {len(fresh_papers)} 篇（180天内）")
+            papers = fresh_papers
+        else:
+            deliver_output(format_no_high_digest(0))
+            logger.info("180天内无新论文")
+            return
+
         # 限制每次最多打分篇数（避免超时）
         max_papers = config.get("max_papers_per_run", 15)
         if len(papers) > max_papers:

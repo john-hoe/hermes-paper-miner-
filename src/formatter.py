@@ -18,9 +18,11 @@ def format_paper_block(paper_result):
     title_line = f"📄 [{score}分] [{institution}] {paper.get('title', '未知')}"
     lines.append(title_line)
 
-    # 链接行
+    # 链接行 + 发布日期
     link = paper.get("url", "")
-    lines.append(f"🔗 {link}")
+    pub = paper.get("published", "")[:10]  # 取日期部分
+    date_tag = f" | 📅 {pub}" if pub else ""
+    lines.append(f"🔗 {link}{date_tag}")
 
     # 偏好命中
     if pref_hit:
