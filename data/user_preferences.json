@@ -1,0 +1,38 @@
+{
+    "focus_areas": [
+        {
+            "keyword": "Mac 本地 LLM / Apple Silicon 推理优化",
+            "weight": 1.0
+        },
+        {
+            "keyword": "多 Agent 协作 / AI Agent 框架",
+            "weight": 0.9
+        },
+        {
+            "keyword": "短视频/内容工厂 / 自动化出片",
+            "weight": 0.9
+        },
+        {
+            "keyword": "QA 自动化测试",
+            "weight": 0.7
+        },
+        {
+            "keyword": "RAG / 长上下文 / 知识库",
+            "weight": 0.7
+        },
+        {
+            "keyword": "TTS / 语音合成 / 语音克隆",
+            "weight": 0.6
+        },
+        {
+            "keyword": "开源模型微调 / GGUF / 本地部署",
+            "weight": 0.6
+        }
+    ],
+    "reject_areas": [
+        "纯生物医药 / 蛋白质折叠",
+        "纯数学理论推导（无工程应用）",
+        "纯学术 benchmark 刷榜（无创新）"
+    ],
+    "last_updated": "2026-04-14"
+}
