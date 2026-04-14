@@ -9,7 +9,7 @@
         "temperature": 0.3
     },
     "scoring": {
-        "push_threshold": 80,
+        "push_threshold": 75,
         "dimensions": {
             "engineering_feasibility": 0.40,
             "pain_point_relevance": 0.30,
