@@ -106,7 +106,7 @@ def run():
             return
 
         threshold = config["scoring"]["push_threshold"]
-        scored_results = []
+        all_results = []  # 记录所有打分结果（不论是否达标）
 
         for i, paper in enumerate(new_papers):
             logger.info(f"  打分中 [{i+1}/{len(new_papers)}]: {paper['title'][:50]}...")
@@ -120,21 +120,18 @@ def run():
                 result["paper"] = paper
                 total = result.get("score", 0)
                 logger.info(f"    → {total} 分 | {result.get('one_liner', '')[:40]}")
-                if total >= threshold:
-                    scored_results.append(result)
+                all_results.append(result)
 
         # ── Step 5: 筛选与格式化 ──
+        scored_results = [r for r in all_results if r.get("score", 0) >= threshold]
+
         if not scored_results:
-            # 找出最高分
-            all_scores = []
-            for p in new_papers:
-                prompt = build_scoring_prompt(p, preferences)
-                r = score_paper(p, prompt, api_key, config["llm"]["api_url"], config["llm"]["model"])
-                if r:
-                    all_scores.append(r.get("score", 0))
-            max_score = max(all_scores) if all_scores else 0
+            max_score = max((r.get("score", 0) for r in all_results), default=0)
             deliver_output(format_no_high_digest(max_score))
             logger.info(f"无高分论文，最高分 {max_score}")
+            # 即使没有高分，也记录所有已处理的论文（避免重复打分）
+            all_paper_ids = [p["id"] for p in new_papers]
+            mark_as_seen(seen_path, seen_ids, all_paper_ids)
             return
 
         # 按分数降序排列

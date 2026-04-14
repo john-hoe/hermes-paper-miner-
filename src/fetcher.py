@@ -3,7 +3,6 @@
 import json
 import logging
 import urllib.request
-from datetime import datetime
 
 logger = logging.getLogger("paper_miner")
 
@@ -12,7 +11,7 @@ def fetch_daily_papers(api_url, timeout=30):
     """从 HuggingFace 拉取今日 Daily Papers。
     
     Returns:
-        list[dict]: 论文列表，每篇包含 id, title, summary, url, authors, published_upvotes
+        list[dict]: 论文列表
         str: 错误信息（如果失败）
     """
     try:
@@ -27,18 +26,24 @@ def fetch_daily_papers(api_url, timeout=30):
         
         papers = []
         for item in raw:
+            p = item.get("paper", {})
             paper = {
-                "id": item.get("paper", {}).get("id", ""),
-                "title": item.get("paper", {}).get("title", "未知标题"),
-                "summary": item.get("paper", {}).get("summary", ""),
-                "url": f"https://huggingface.co/papers/{item.get('paper', {}).get('id', '')}",
-                "authors": [a.get("name", "") for a in item.get("paper", {}).get("authors", [])],
-                "published": item.get("paper", {}).get("published", ""),
-                "upvotes": item.get("paper", {}).get("upvotes", 0),
+                "id": p.get("id", ""),
+                "title": p.get("title", "未知标题"),
+                "summary": p.get("summary", ""),
+                "url": f"https://huggingface.co/papers/{p.get('id', '')}",
+                "authors": [a.get("name", "") for a in p.get("authors", [])],
+                "published": p.get("publishedAt", ""),
+                "upvotes": item.get("upvotes", p.get("upvotes", 0)),
+                "github_repo": p.get("githubRepo", ""),
+                "ai_summary": p.get("ai_summary", ""),
+                "ai_keywords": p.get("ai_keywords", []),
             }
             if paper["id"]:
                 papers.append(paper)
         
+        # 按热度降序排列
+        papers.sort(key=lambda x: x["upvotes"], reverse=True)
         logger.info(f"成功拉取 {len(papers)} 篇论文")
         return papers, None
 
