@@ -77,6 +77,12 @@ def run():
             logger.info("无论文数据")
             return
 
+        # 限制每次最多打分篇数（避免超时）
+        max_papers = config.get("max_papers_per_run", 15)
+        if len(papers) > max_papers:
+            logger.info(f"截取 top {max_papers} 篇（共 {len(papers)} 篇）")
+            papers = papers[:max_papers]
+
         # ── Step 2: 去重 ──
         logger.info(f"Step 2: 去重过滤（共 {len(papers)} 篇）...")
         seen_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", config["dedup"]["seen_papers_path"])
