@@ -1,5 +1,11 @@
 {
     "hf_api_url": "https://huggingface.co/api/daily_papers",
+    "modelscope": {
+        "enabled": true,
+        "api_url": "https://modelscope.cn/api/v1/papers",
+        "page_size": 20,
+        "min_innovation_score": 450
+    },
     "llm": {
         "provider": "deepseek",
         "api_url": "https://api.deepseek.com/chat/completions",

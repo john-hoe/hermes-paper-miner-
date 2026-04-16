@@ -13,6 +13,7 @@ PROMPT_TEMPLATE = """你是一位资深 AI 工程师兼科技投资人，正在�
 标题：{title}
 作者：{authors}
 摘要：{summary}
+{ms_context}
 
 ## 用户当前关注方向
 {focus_areas}
@@ -78,10 +79,24 @@ def build_scoring_prompt(paper, preferences):
     reject = "\n".join(f"- {r}" for r in preferences.get("reject_areas", []))
     authors = ", ".join(paper.get("authors", [])[:5])
     
+    # ModelScope 预评分上下文（如果有）
+    ms_context = ""
+    if paper.get("source") == "modelscope":
+        ms_parts = []
+        if paper.get("ms_innovation_score"):
+            ms_parts.append(f"ModelScope AI 预评创新分: {paper['ms_innovation_score']}/500")
+        if paper.get("ms_tech_depth_score"):
+            ms_parts.append(f"ModelScope AI 预评技术深度: {paper['ms_tech_depth_score']}/500")
+        if paper.get("ms_final_comment"):
+            ms_parts.append(f"ModelScope AI 评语: {paper['ms_final_comment'][:300]}")
+        if ms_parts:
+            ms_context = "## ModelScope AI 预评估（仅供参考，请独立判断）\n" + "\n".join(f"- {p}" for p in ms_parts)
+    
     return PROMPT_TEMPLATE.format(
         title=paper["title"],
         authors=authors,
         summary=paper["summary"],
+        ms_context=ms_context,
         focus_areas=focus or "- 暂无设定",
         reject_areas=reject or "- 暂无设定",
     )

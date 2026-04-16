@@ -13,7 +13,7 @@ from datetime import datetime
 # 确保能 import 同目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fetcher import fetch_daily_papers, get_error_message
+from fetcher import fetch_daily_papers, fetch_modelscope_papers, dedup_cross_source, get_error_message
 from dedup import load_seen_papers, filter_seen, mark_as_seen
 from preferences import load_preferences, build_scoring_prompt, should_remind_preferences, get_reminder_text
 from scorer import score_paper
@@ -63,16 +63,32 @@ def run():
         config = load_config()
         logger.info("=== Paper Miner 开始运行 ===")
 
-        # ── Step 1: 拉取数据 ──
-        logger.info("Step 1: 拉取 HuggingFace Daily Papers...")
-        papers, error = fetch_daily_papers(config["hf_api_url"])
-        if error:
-            alert = format_alert_message(get_error_message(error))
-            deliver_output(alert)
-            logger.error(f"拉取失败: {error}")
-            return
-
-        if not papers:
+        # ── Step 1: 双源拉取数据 ──
+        logger.info("Step 1: 拉取论文数据...")
+        
+        # 源1: HuggingFace Daily Papers
+        hf_papers, hf_error = fetch_daily_papers(config["hf_api_url"])
+        if hf_error:
+            logger.warning(f"HF 拉取失败: {hf_error}")
+        
+        # 源2: ModelScope 最新论文
+        ms_papers, ms_error = fetch_modelscope_papers(config)
+        if ms_error:
+            logger.warning(f"ModelScope 拉取失败: {ms_error}")
+        
+        # 合并双源
+        all_papers = []
+        if hf_papers:
+            all_papers.extend(hf_papers)
+        if ms_papers:
+            all_papers.extend(ms_papers)
+        
+        logger.info(f"双源合并: HF {len(hf_papers)} 篇 + ModelScope {len(ms_papers)} 篇 = {len(all_papers)} 篇")
+        
+        # 跨源去重（同 arxiv_id 保留 HF 版本）
+        all_papers = dedup_cross_source(all_papers)
+        
+        if not all_papers:
             deliver_output(format_no_high_digest(0))
             logger.info("无论文数据")
             return
@@ -81,7 +97,7 @@ def run():
         from datetime import datetime, timedelta, timezone
         cutoff = datetime.now(timezone.utc) - timedelta(days=180)
         fresh_papers = []
-        for p in papers:
+        for p in all_papers:
             pub = p.get("published", "")
             if pub:
                 try:
@@ -93,7 +109,7 @@ def run():
             else:
                 fresh_papers.append(p)
         if fresh_papers:
-            logger.info(f"新鲜度过滤：{len(papers)} → {len(fresh_papers)} 篇（180天内）")
+            logger.info(f"新鲜度过滤：{len(all_papers)} → {len(fresh_papers)} 篇（180天内）")
             papers = fresh_papers
         else:
             deliver_output(format_no_high_digest(0))
