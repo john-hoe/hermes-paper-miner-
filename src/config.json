@@ -33,7 +33,15 @@
         "refresh_interval_days": 14
     },
     "telegram": {
-        "delivery_mode": "cronjob_auto"
+        "delivery_mode": "direct_api",
+        "chat_id": "6202626135"
+    },
+    "feedback": {
+        "path": "data/feedback.jsonl"
+    },
+    "reddit_watcher": {
+        "enabled": false,
+        "note": "独立运行，不影响推送。开启后14天自动停止。手动运行: python3 src/reddit_watcher.py"
     },
     "notion": {
         "api_key_env": "NOTION_API_KEY",

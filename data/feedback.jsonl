@@ -1,0 +1,3 @@
+{"paper_id": "2504.98765", "feedback": "up", "timestamp": "2026-04-17T02:10:09.732184", "user": "john"}
+{"paper_id": "test.12345", "feedback": "down", "timestamp": "2026-04-17T03:32:52.445439", "user": "john"}
+{"paper_id": "test.12345", "feedback": "down", "timestamp": "2026-04-17T03:33:00.456544", "user": "john", "reason": "shallow"}

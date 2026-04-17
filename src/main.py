@@ -1,7 +1,8 @@
 """PM-004.1: Paper Miner 主入口 — 串联所有模块
 
-主流程：拉取 → 去重 → 打分 → 筛选 → 格式化 → 推送 → 记录已读
-运行方式：由 Hermes cronjob 每日 8:00 自动触发，stdout 自动 deliver 到 Telegram
+改版：逐篇推送 + inline keyboard 反馈
+主流程：拉取 → 去重 → 打分 → 筛选 → 逐篇推送 → 记录已读
+运行方式：由 Hermes cronjob 每日 8:00 自动触发
 """
 
 import json
@@ -17,8 +18,9 @@ from fetcher import fetch_daily_papers, fetch_modelscope_papers, dedup_cross_sou
 from dedup import load_seen_papers, filter_seen, mark_as_seen
 from preferences import load_preferences, build_scoring_prompt, should_remind_preferences, get_reminder_text
 from scorer import score_paper
-from formatter import format_daily_digest, format_no_high_digest
-from pusher import deliver_output, format_alert_message
+from formatter import format_single_paper, format_no_high_digest, format_error_alert
+from pusher import deliver_output, format_alert_message, send_paper_message, send_summary_message
+from feedback import record_feedback
 from notion_sync import update_notion_task_status
 
 # 配置日志
@@ -89,7 +91,7 @@ def run():
         all_papers = dedup_cross_source(all_papers)
         
         if not all_papers:
-            deliver_output(format_no_high_digest(0))
+            deliver_output(format_no_high_digest(0)["text"])
             logger.info("无论文数据")
             return
 
@@ -112,7 +114,7 @@ def run():
             logger.info(f"新鲜度过滤：{len(all_papers)} → {len(fresh_papers)} 篇（180天内）")
             papers = fresh_papers
         else:
-            deliver_output(format_no_high_digest(0))
+            deliver_output(format_no_high_digest(0)["text"])
             logger.info("180天内无新论文")
             return
 
@@ -129,7 +131,7 @@ def run():
         new_papers = filter_seen(papers, seen_ids)
         
         if not new_papers:
-            deliver_output(format_no_high_digest(0))
+            deliver_output(format_no_high_digest(0)["text"])
             logger.info("全部论文已推送过，无新论文")
             return
 
@@ -167,14 +169,32 @@ def run():
                 logger.info(f"    → {total} 分 | {result.get('one_liner', '')[:40]}")
                 all_results.append(result)
 
-        # ── Step 5: 筛选与格式化 ──
+        # ── Step 5: 筛选 ──
         scored_results = [r for r in all_results if r.get("score", 0) >= threshold]
 
         if not scored_results:
             max_score = max((r.get("score", 0) for r in all_results), default=0)
-            deliver_output(format_no_high_digest(max_score))
+            deliver_output(format_no_high_digest(max_score)["text"])
             logger.info(f"无高分论文，最高分 {max_score}")
             # 即使没有高分，也记录所有已处理的论文（避免重复打分）
+            # 持久化打分结果（供反馈分析用）
+            scoring_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "scoring_results.jsonl")
+            os.makedirs(os.path.dirname(scoring_log_path), exist_ok=True)
+            with open(scoring_log_path, "a", encoding="utf-8") as sf:
+                for r in all_results:
+                    record = {
+                        "paper_id": r.get("paper", {}).get("id", ""),
+                        "score": r.get("score", 0),
+                        "title": r.get("paper", {}).get("title", ""),
+                        "institution": r.get("institution", ""),
+                        "preference_hit": r.get("preference_hit"),
+                        "one_liner": r.get("one_liner", ""),
+                        "why_read": r.get("why_read", ""),
+                        "deep_take": r.get("deep_take", ""),
+                        "scenarios": r.get("scenarios", []),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    sf.write(json.dumps(record, ensure_ascii=False) + "\n")
             all_paper_ids = [p["id"] for p in new_papers]
             mark_as_seen(seen_path, seen_ids, all_paper_ids)
             return
@@ -182,17 +202,59 @@ def run():
         # 按分数降序排列
         scored_results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-        logger.info(f"Step 5: 格式化日报（{len(scored_results)} 篇高分）...")
-        digest = format_daily_digest(scored_results, remind_text)
+        # ── Step 6: 逐篇推送 ──
+        logger.info(f"Step 6: 逐篇推送（{len(scored_results)} 篇高分）...")
+        
+        pushed_count = 0
+        for i, result in enumerate(scored_results):
+            msg_id = send_paper_message(result, config)
+            if msg_id:
+                pushed_count += 1
+                logger.info(f"  ✅ [{i+1}/{len(scored_results)}] 已推送: {result['paper']['title'][:40]}... (msg_id={msg_id})")
+                # 预记录到 feedback（方便后续 callback 关联打分结果）
+                record_feedback(result["paper"]["id"], "sent", result)
+            else:
+                # Telegram 推送失败，回退到 stdout
+                fallback = format_single_paper(result)
+                deliver_output(fallback["text"])
+                pushed_count += 1
+                logger.warning(f"  ⚠️ [{i+1}] Telegram 推送失败，回退 stdout")
 
-        # ── Step 6: 推送 ──
-        deliver_output(digest)
+        # ── Step 7: 发送总结 ──
+        send_summary_message(scored_results, config, remind_text)
 
-        # ── Step 7: 记录已推送 ──
+        # ── Step 8: 持久化打分结果（供反馈分析用）──
+        scoring_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "scoring_results.jsonl")
+        os.makedirs(os.path.dirname(scoring_log_path), exist_ok=True)
+        with open(scoring_log_path, "a", encoding="utf-8") as sf:
+            for r in all_results:
+                record = {
+                    "paper_id": r.get("paper", {}).get("id", ""),
+                    "score": r.get("score", 0),
+                    "title": r.get("paper", {}).get("title", ""),
+                    "institution": r.get("institution", ""),
+                    "preference_hit": r.get("preference_hit"),
+                    "one_liner": r.get("one_liner", ""),
+                    "why_read": r.get("why_read", ""),
+                    "deep_take": r.get("deep_take", ""),
+                    "scenarios": r.get("scenarios", []),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                sf.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        # ── Step 9: 记录已推送 ──
         pushed_ids = [r["paper"]["id"] for r in scored_results]
         mark_as_seen(seen_path, seen_ids, pushed_ids)
 
-        logger.info(f"=== Paper Miner 完成：推送 {len(scored_results)} 篇 ===")
+        logger.info(f"=== Paper Miner 完成：推送 {pushed_count}/{len(scored_results)} 篇 ===")
+
+        # ── Step 10: Reddit Watcher（可选，feature flag 控制）──
+        if config.get("reddit_watcher", {}).get("enabled", False):
+            try:
+                from reddit_watcher import run_watcher
+                run_watcher()
+            except Exception as e:
+                logger.warning(f"Reddit watcher 运行异常（不影响主流程）: {e}")
 
     except Exception as e:
         logger.exception("Paper Miner 运行异常")
