@@ -40,7 +40,7 @@
         "path": "data/feedback.jsonl"
     },
     "reddit_watcher": {
-        "enabled": false,
+        "enabled": true,
         "note": "独立运行，不影响推送。开启后14天自动停止。手动运行: python3 src/reddit_watcher.py"
     },
     "notion": {
