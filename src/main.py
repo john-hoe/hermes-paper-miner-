@@ -19,7 +19,7 @@ from dedup import load_seen_papers, filter_seen, mark_as_seen
 from preferences import load_preferences, build_scoring_prompt, should_remind_preferences, get_reminder_text
 from scorer import score_paper
 from formatter import format_single_paper, format_no_high_digest, format_error_alert
-from pusher import deliver_output, format_alert_message, send_paper_message, send_summary_message
+from pusher import deliver_output, format_alert_message, send_paper_message, send_summary_message, send_no_papers_message
 from feedback import record_feedback
 from notion_sync import update_notion_task_status
 
@@ -174,7 +174,7 @@ def run():
 
         if not scored_results:
             max_score = max((r.get("score", 0) for r in all_results), default=0)
-            deliver_output(format_no_high_digest(max_score)["text"])
+            send_no_papers_message(config)
             logger.info(f"无高分论文，最高分 {max_score}")
             # 即使没有高分，也记录所有已处理的论文（避免重复打分）
             # 持久化打分结果（供反馈分析用）

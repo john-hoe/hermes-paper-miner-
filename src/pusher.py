@@ -134,6 +134,31 @@ def send_summary_message(results, config, remind_text=None):
     return _call_telegram_api("sendMessage", token, payload)
 
 
+def send_no_papers_message(config):
+    """发送「今日无高分论文」通知消息。
+
+    当日无论文得分超过 75 分时调用，告知用户数据源正常，次日继续。
+
+    Args:
+        config: 全局配置
+
+    Returns:
+        message_id: 发送成功的消息 ID，失败返回 None
+    """
+    token = _get_bot_token(config)
+    chat_id = _get_chat_id(config)
+
+    if not token:
+        return None
+
+    payload = {
+        "chat_id": chat_id,
+        "text": "📭 今天没有高分论文（>75分）\n数据源正常，明天继续淘金。",
+        "parse_mode": "HTML",
+    }
+    return _call_telegram_api("sendMessage", token, payload)
+
+
 def answer_callback_query(callback_query_id, token, text=""):
     """应答 Telegram callback_query（必须，否则按钮会一直转圈）。"""
     payload = {
@@ -141,6 +166,34 @@ def answer_callback_query(callback_query_id, token, text=""):
         "text": text,
     }
     _call_telegram_api("answerCallbackQuery", token, payload)
+
+
+def send_no_papers_message(config):
+    """发送「今日无高分论文」通知到 Telegram。
+
+    在所有论文都打过分但没有达到推送阈值时调用，
+    代替 deliver_output 的纯 stdout 输出。
+    """
+    token = _get_bot_token(config)
+    chat_id = _get_chat_id(config)
+
+    if not token:
+        logger.warning("Telegram Bot Token 未找到，回退到 stdout")
+        from formatter import format_no_high_digest
+        print(format_no_high_digest(0)["text"])
+        return None
+
+    text = (
+        "📭 <b>今日淘金完毕</b>\n"
+        "所有论文已评分，但没有达到推送阈值的高分论文。\n"
+        "明天继续！"
+    )
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+    return _call_telegram_api("sendMessage", token, payload)
 
 
 def _call_telegram_api(method, token, payload):

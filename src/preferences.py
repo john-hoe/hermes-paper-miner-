@@ -116,6 +116,51 @@ def should_remind_preferences(preferences, interval_days=14):
         return True
 
 
+def adjust_weight(preferences, keyword, signal, alpha=0.2):
+    """平滑调整某个 focus_area 的权重。
+
+    公式：new_weight = old_weight * (1 - alpha) + signal * alpha
+    signal > 0 提权，signal < 0 降权。权重 clamp 到 [0.1, 1.0]。
+
+    Args:
+        preferences: user_preferences dict
+        keyword: 要调整的 focus_area keyword
+        signal: 信号值，通常 1.0（👍）或 -1.0（👎）
+        alpha: 平滑系数，默认 0.2
+
+    Returns:
+        (changed, old_weight, new_weight)
+    """
+    for area in preferences.get("focus_areas", []):
+        if area["keyword"].lower() == keyword.lower():
+            old_w = area.get("weight", 0.5)
+            new_w = old_w * (1 - alpha) + signal * alpha
+            new_w = max(0.1, min(1.0, round(new_w, 3)))
+            area["weight"] = new_w
+            return True, old_w, new_w
+    return False, None, None
+
+
+def add_reject_area(preferences, keyword):
+    """添加一个新的 reject_area（如已存在则跳过）。
+
+    Args:
+        preferences: user_preferences dict
+        keyword: 要拒绝的方向关键词
+
+    Returns:
+        True if added, False if already exists
+    """
+    rejects = preferences.get("reject_areas", [])
+    # 大小写不敏感检查
+    for r in rejects:
+        if r.lower() == keyword.lower():
+            return False
+    rejects.append(keyword)
+    preferences["reject_areas"] = rejects
+    return True
+
+
 def get_reminder_text(preferences):
     """生成偏好提醒文案。"""
     return (

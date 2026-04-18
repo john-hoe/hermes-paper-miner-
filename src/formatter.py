@@ -27,7 +27,12 @@ def format_single_paper(paper_result):
 
     # 标题行：分数 + 机构
     title = paper.get("title", "未知标题")
-    lines.append(f"📄 <b>[{score}分] {title}</b>")
+    github_repo = paper.get("github_repo", "")
+    has_code = github_repo and github_repo.startswith("http")
+    if has_code:
+        lines.append(f"📄 <b>[{score}分] [有代码🔧] {title}</b>")
+    else:
+        lines.append(f"📄 <b>[{score}分] {title}</b>")
     lines.append(f"🏛 {institution}")
 
     # 链接 + 日期
@@ -35,6 +40,10 @@ def format_single_paper(paper_result):
     pub = paper.get("published", "")[:10]
     if link:
         lines.append(f'🔗 <a href="{link}">论文链接</a>  📅 {pub}' if pub else f'🔗 <a href="{link}">论文链接</a>')
+
+    # 代码仓库链接
+    if has_code:
+        lines.append(f'🔧 <a href="{github_repo}">代码仓库</a>')
 
     # 偏好命中
     if pref_hit:

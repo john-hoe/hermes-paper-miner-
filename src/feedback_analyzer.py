@@ -169,20 +169,119 @@ def build_report(analysis, prefs):
     return "\n".join(lines)
 
 
-def auto_adjust_weights(analysis, prefs):
-    """Auto-adjust focus area weights based on feedback (conservative)."""
-    changed = False
-    reason_counts = analysis.get("reasons", {})
+def _load_scoring_results():
+    """加载 scoring_results.jsonl，构建 paper_id → preference_hit 映射。"""
+    scoring_path = os.path.join(DATA_DIR, "scoring_results.jsonl")
+    if not os.path.exists(scoring_path):
+        return {}
+    mapping = {}
+    with open(scoring_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                pid = rec.get("paper_id", "")
+                hit = rec.get("preference_hit")
+                if pid and hit:
+                    # 同一 paper_id 可能多次打分，取最后一次
+                    mapping[pid] = hit
+            except json.JSONDecodeError:
+                continue
+    return mapping
 
-    # If "topic" or "domain" is dominant (>50% of downs), suggest but don't auto-modify
-    # Auto-adjust: slightly boost weights for papers that got 👍 (if we can match focus areas)
-    # For now: just update last_updated timestamp and return whether prefs changed
 
-    # Future: can cross-reference paper_id with scored papers to find which
-    # focus_areas they matched, then adjust weights accordingly.
+def auto_adjust_weights(analysis, prefs, records):
+    """根据反馈数据自动调整 focus_area 权重。
 
-    # Mark analysis time
-    return changed
+    规则：
+    - 👍 论文：提升其 preference_hit 对应的 focus_area 权重（signal=1.0）
+    - 👎 reason=topic：降低对应 focus_area 权重（signal=-1.0）
+    - 👎 reason=domain：降低权重 + 加入 reject_areas
+    - 👎 reason=shallow/seen：不动（不是方向问题）
+    - 平滑公式：new = old * 0.8 + signal * 0.2
+
+    Args:
+        analysis: analyze() 的返回结果（含 reasons 等）
+        prefs: user_preferences dict
+        records: 原始 feedback records（用于获取 paper_id）
+
+    Returns:
+        list of adjustment log strings
+    """
+    from preferences import adjust_weight, add_reject_area
+
+    log_lines = []
+    hit_map = _load_scoring_results()
+
+    if not hit_map:
+        log_lines.append("⚠️ scoring_results.jsonl 为空或无 preference_hit 数据，跳过调整")
+        return log_lines
+
+    # 按论文分组反馈
+    paper_signals = {}  # {paper_id: {"signal": float, "reasons": list}}
+    for r in records:
+        fb = r.get("feedback", "")
+        pid = r.get("paper_id", "")
+        if not pid or fb == "sent":
+            continue
+        if pid not in paper_signals:
+            paper_signals[pid] = {"signal": 0.0, "reasons": []}
+        if fb == "up":
+            paper_signals[pid]["signal"] += 1.0
+        elif fb == "down":
+            reason = r.get("reason", "")
+            paper_signals[pid]["reasons"].append(reason)
+            if reason == "topic":
+                paper_signals[pid]["signal"] -= 1.0
+            elif reason == "domain":
+                paper_signals[pid]["signal"] -= 1.0
+            # shallow/seen/free_text → signal 不变
+
+    # 按方向汇总信号并调整
+    area_signals = {}  # {keyword: total_signal}
+    domain_reject_candidates = set()
+
+    for pid, info in paper_signals.items():
+        hit = hit_map.get(pid)
+        if not hit:
+            continue
+        # hit 可能是逗号分隔的多方向，取第一个主要方向
+        keyword = hit.split(",")[0].strip()
+        if keyword not in area_signals:
+            area_signals[keyword] = 0.0
+        area_signals[keyword] += info["signal"]
+
+        # domain 类的候选 reject
+        if "domain" in info["reasons"]:
+            domain_reject_candidates.add(keyword)
+
+    if not area_signals:
+        log_lines.append("📭 无法匹配反馈到任何 focus_area，跳过调整")
+        return log_lines
+
+    # 执行调整
+    for keyword, total_signal in area_signals.items():
+        # 信号调整（total_signal == 0 时不调权重）
+        if total_signal != 0:
+            clamped_signal = max(-1.0, min(1.0, total_signal))
+            changed, old_w, new_w = adjust_weight(prefs, keyword, clamped_signal)
+
+            if changed:
+                arrow = "↑" if new_w > old_w else "↓"
+                log_lines.append(f"  {keyword}: {old_w:.3f} → {new_w:.3f} {arrow} (signal={clamped_signal:+.1f})")
+
+        # domain → 加 reject（独立于 signal 总量）
+        if keyword in domain_reject_candidates:
+            added = add_reject_area(prefs, keyword)
+            if added:
+                log_lines.append(f"  🚫 新增 reject_area: {keyword}")
+
+    if not log_lines:
+        log_lines.append("✅ 反馈信号为零，权重无需调整")
+
+    return log_lines
 
 
 def run():
@@ -206,8 +305,13 @@ def run():
 
     prefs = load_preferences()
 
-    # Auto-adjust
-    auto_adjust_weights(full_analysis, prefs)
+    # Auto-adjust（传入 full records 用于按 paper_id 匹配）
+    log_lines = auto_adjust_weights(full_analysis, prefs, records)
+    if log_lines:
+        for line in log_lines:
+            print(line)
+        # 有实际调整才保存
+        save_preferences(prefs)
 
     # Build report (based on new data since last analysis)
     report = build_report(new_analysis, prefs)
